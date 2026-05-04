@@ -1,10 +1,9 @@
-using Npgsql;
-using System.Data.Common;
+using System;
 using System.Collections.Generic;
-using System.Linq;
+using System.Data;
 using System.Threading.Tasks;
-using Taller_Mecanico_Users.Domain.Entities;
 using Taller_Mecanico_Users.Domain.Common;
+using Taller_Mecanico_Users.Domain.Entities;
 using Taller_Mecanico_Users.Domain.Ports;
 using Taller_Mecanico_Users.Framework.Persistence;
 using Taller_Mecanico_Users.Framework.Services;
@@ -13,7 +12,6 @@ namespace Taller_Mecanico_Users.Data.Repositories
 {
     public class UsuarioLoginRepository : IUsuarioLoginRepository
     {
-
         private readonly ISqlConnectionFactory _connectionFactory;
         private readonly IAuthenticationHelper _authHelper;
 
@@ -23,238 +21,232 @@ namespace Taller_Mecanico_Users.Data.Repositories
             _authHelper = authHelper;
         }
 
-        public async Task<UsuarioLogin?> GetByEmailAsync(string email)
-        {
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync();
-
-            var sql = @"
-SELECT usuariologinid, empleadoid, clienteid, email, passwordhash, ultimoacceso, activo, requierecambiopassword, escliente
-FROM usuariologin
-WHERE email = @email AND activo = TRUE;";
-
-            await using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            var param = command.CreateParameter();
-            param.ParameterName = "email";
-            param.Value = email;
-            command.Parameters.Add(param);
-
-            await using var reader = await command.ExecuteReaderAsync();
-            if (!await reader.ReadAsync())
-                return null;
-
-            return ReconstituirFromReader(reader);
-        }
-
-        public async Task<IEnumerable<UsuarioLogin>> GetAllAsync()
-        {
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync();
-
-            var sql = @"
-SELECT usuariologinid, empleadoid, clienteid, email, passwordhash, ultimoacceso, activo, requierecambiopassword, escliente
-FROM usuariologin
-ORDER BY email;";
-
-            var logins = new List<UsuarioLogin>();
-            await using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            await using var reader = await command.ExecuteReaderAsync();
-
-            while (await reader.ReadAsync())
-            {
-                logins.Add(ReconstituirFromReader(reader));
-            }
-
-            return logins;
-        }
-
-        public async Task<Result<UsuarioLogin?>> GetByIdAsync(int id)
-        {
-            try
-            {
-                await using var connection = _connectionFactory.CreateConnection();
-                await connection.OpenAsync();
-
-                var sql = @"
-SELECT usuariologinid, empleadoid, clienteid, email, passwordhash, ultimoacceso, activo, requierecambiopassword, escliente
-FROM usuariologin
-WHERE usuariologinid = @id;";
-
-                await using var command = connection.CreateCommand();
-                command.CommandText = sql;
-                var p = command.CreateParameter();
-                p.ParameterName = "id";
-                p.Value = id;
-                command.Parameters.Add(p);
-
-                await using var reader = await command.ExecuteReaderAsync();
-                if (!await reader.ReadAsync())
-                    return Result<UsuarioLogin?>.Success(null);
-
-                return Result<UsuarioLogin?>.Success(ReconstituirFromReader(reader));
-            }
-            catch (Exception ex)
-            {
-                return Result<UsuarioLogin?>.Failure(ErrorCodes.DbError, $"Error al obtener usuario login con ID {id}: {ex.Message}");
-            }
-        }
-
-        public async Task<UsuarioLogin?> GetByEmpleadoIdAsync(int empleadoId)
-        {
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync();
-
-            var sql = @"
-SELECT usuariologinid, empleadoid, clienteid, email, passwordhash, ultimoacceso, activo, requierecambiopassword, escliente
-FROM usuariologin
-WHERE empleadoid = @empleadoId AND activo = TRUE;";
-
-            await using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            var p2 = command.CreateParameter();
-            p2.ParameterName = "empleadoId";
-            p2.Value = empleadoId;
-            command.Parameters.Add(p2);
-
-            await using var reader = await command.ExecuteReaderAsync();
-            if (!await reader.ReadAsync())
-                return null;
-
-            return ReconstituirFromReader(reader);
-        }
-
-        public async Task<UsuarioLogin?> GetByClienteIdAsync(int clienteId)
-        {
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync();
-
-            var sql = @"
-SELECT usuariologinid, empleadoid, clienteid, email, passwordhash, ultimoacceso, activo, requierecambiopassword, escliente
-FROM usuariologin
-WHERE clienteid = @clienteId AND activo = TRUE;";
-
-            await using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            var p3 = command.CreateParameter();
-            p3.ParameterName = "clienteId";
-            p3.Value = clienteId;
-            command.Parameters.Add(p3);
-
-            await using var reader = await command.ExecuteReaderAsync();
-            if (!await reader.ReadAsync())
-                return null;
-
-            return ReconstituirFromReader(reader);
-        }
-
         public async Task<Result> AddAsync(UsuarioLogin entity)
         {
+            string actor = _authHelper.GetCurrentAuditActor();
+            
+            using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync();
+            using var transaction = connection.BeginTransaction();
+
             try
             {
-                await using var connection = _connectionFactory.CreateConnection();
-                await connection.OpenAsync();
+                // --- A. INSERTAR EL USUARIO ---
+                var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = @"
+                    INSERT INTO usuariologin (empleadoid, clienteid, email, passwordhash, activo, requierecambiopassword, escliente) 
+                    VALUES (@EmpleadoId, @ClienteId, @Email, @PasswordHash, @Activo, @RequiereCambioPassword, @EsCliente)
+                    RETURNING usuariologinid;";
 
-                var actorAuditoria = _authHelper.GetCurrentAuditActor();
+                AddParameter(command, "@EmpleadoId", entity.EmpleadoId ?? (object)DBNull.Value);
+                AddParameter(command, "@ClienteId", entity.ClienteId ?? (object)DBNull.Value);
+                AddParameter(command, "@Email", entity.Email);
+                AddParameter(command, "@PasswordHash", entity.PasswordHash);
+                AddParameter(command, "@Activo", entity.Activo);
+                AddParameter(command, "@RequiereCambioPassword", entity.RequiereCambioPassword);
+                AddParameter(command, "@EsCliente", entity.EsCliente);
 
-                var sql = entity.EsCliente
-                    ? @"
-INSERT INTO usuariologin (clienteid, email, passwordhash, activo, requierecambiopassword, escliente, creadopor)
-VALUES (@clienteid, @email, @passwordhash, @activo, @requierecambiopassword, @escliente, @creadopor)
-RETURNING usuariologinid;"
-                    : @"
-INSERT INTO usuariologin (empleadoid, email, passwordhash, activo, requierecambiopassword, escliente, creadopor)
-VALUES (@empleadoid, @email, @passwordhash, @activo, @requierecambiopassword, @escliente, @creadopor)
-RETURNING usuariologinid;";
-
-                await using var command = connection.CreateCommand();
-                command.CommandText = sql;
-
-                if (entity.EsCliente)
+                var result = await command.ExecuteScalarAsync();
+                if (result != null)
                 {
-                    var cp = command.CreateParameter(); cp.ParameterName = "clienteid"; cp.Value = entity.ClienteId!.Value; command.Parameters.Add(cp);
-                }
-                else
-                {
-                    var ep = command.CreateParameter(); ep.ParameterName = "empleadoid"; ep.Value = entity.EmpleadoId!.Value; command.Parameters.Add(ep);
+                    entity.UsuarioLoginId = Convert.ToInt32(result);
                 }
 
-                var pEmail = command.CreateParameter(); pEmail.ParameterName = "email"; pEmail.Value = entity.Email; command.Parameters.Add(pEmail);
-                var pPass = command.CreateParameter(); pPass.ParameterName = "passwordhash"; pPass.Value = entity.PasswordHash; command.Parameters.Add(pPass);
-                var pActivo = command.CreateParameter(); pActivo.ParameterName = "activo"; pActivo.Value = entity.Activo; command.Parameters.Add(pActivo);
-                var pReq = command.CreateParameter(); pReq.ParameterName = "requierecambiopassword"; pReq.Value = entity.RequiereCambioPassword; command.Parameters.Add(pReq);
-                var pEsCli = command.CreateParameter(); pEsCli.ParameterName = "escliente"; pEsCli.Value = entity.EsCliente; command.Parameters.Add(pEsCli);
-                var pCreador = command.CreateParameter(); pCreador.ParameterName = "creadopor"; pCreador.Value = actorAuditoria; command.Parameters.Add(pCreador);
+                // --- B. INSERTAR EN BITÁCORA (AUDITORÍA) ---
+                var auditCommand = connection.CreateCommand();
+                auditCommand.Transaction = transaction;
+                auditCommand.CommandText = @"
+                    INSERT INTO audit_logs (tabla_afectada, registro_id, accion, realizado_por, fecha_hora) 
+                    VALUES ('usuariologin', @RegistroId, 'INSERT', @Actor, @FechaHora);";
 
-                var resultObj = await command.ExecuteScalarAsync();
-                entity.UsuarioLoginId = Convert.ToInt32(resultObj);
+                AddParameter(auditCommand, "@RegistroId", entity.UsuarioLoginId);
+                AddParameter(auditCommand, "@Actor", actor);
+                AddParameter(auditCommand, "@FechaHora", DateTime.UtcNow);
+
+                await auditCommand.ExecuteNonQueryAsync();
+
+                // Confirmamos la transacción
+                transaction.Commit();
+
                 return Result.Success();
-            }
-            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
-            {
-                return Result.Failure(ErrorCodes.UsuarioEmailDuplicado, "El correo electrónico ya está registrado.");
             }
             catch (Exception ex)
             {
-                return Result.Failure(ErrorCodes.DbError, $"Error al registrar usuario login: {ex.Message}");
+                transaction.Rollback();
+                return Result.Failure(ErrorCodes.DbError, ex.Message);
             }
         }
 
         public async Task<Result> UpdateAsync(UsuarioLogin entity)
         {
+            string actor = _authHelper.GetCurrentAuditActor();
+            
+            using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync();
+            using var transaction = connection.BeginTransaction();
+
             try
             {
-                await using var connection = _connectionFactory.CreateConnection();
-                await connection.OpenAsync();
+                // --- A. ACTUALIZAR EL USUARIO ---
+                var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = @"
+                    UPDATE usuariologin 
+                    SET email = @Email, 
+                        activo = @Activo, 
+                        requierecambiopassword = @RequiereCambioPassword,
+                        passwordhash = @PasswordHash
+                    WHERE usuariologinid = @UsuarioLoginId;";
 
-                var sql = @"
-UPDATE usuariologin
-SET email = @email,
-    passwordhash = @passwordhash,
-    activo = @activo,
-    ultimoacceso = @ultimoacceso,
-    requierecambiopassword = @requierecambiopassword,
-    actualizadopor = @actualizadopor
-WHERE usuariologinid = @usuariologinid;";
+                AddParameter(command, "@UsuarioLoginId", entity.UsuarioLoginId);
+                AddParameter(command, "@Email", entity.Email);
+                AddParameter(command, "@Activo", entity.Activo);
+                AddParameter(command, "@RequiereCambioPassword", entity.RequiereCambioPassword);
+                AddParameter(command, "@PasswordHash", entity.PasswordHash);
 
-                var actorAuditoria = _authHelper.GetCurrentAuditActor();
+                var rowsAffected = await command.ExecuteNonQueryAsync();
 
-                await using var command = connection.CreateCommand();
-                command.CommandText = sql;
-                var pId = command.CreateParameter(); pId.ParameterName = "usuariologinid"; pId.Value = entity.UsuarioLoginId; command.Parameters.Add(pId);
-                var pEmail2 = command.CreateParameter(); pEmail2.ParameterName = "email"; pEmail2.Value = entity.Email; command.Parameters.Add(pEmail2);
-                var pPass2 = command.CreateParameter(); pPass2.ParameterName = "passwordhash"; pPass2.Value = entity.PasswordHash; command.Parameters.Add(pPass2);
-                var pActivo2 = command.CreateParameter(); pActivo2.ParameterName = "activo"; pActivo2.Value = entity.Activo; command.Parameters.Add(pActivo2);
-                var pUlt = command.CreateParameter(); pUlt.ParameterName = "ultimoacceso"; pUlt.Value = (object?)entity.UltimoAcceso ?? DBNull.Value; command.Parameters.Add(pUlt);
-                var pReq2 = command.CreateParameter(); pReq2.ParameterName = "requierecambiopassword"; pReq2.Value = entity.RequiereCambioPassword; command.Parameters.Add(pReq2);
-                var pAct = command.CreateParameter(); pAct.ParameterName = "actualizadopor"; pAct.Value = actorAuditoria; command.Parameters.Add(pAct);
+                if (rowsAffected == 0)
+                {
+                    return Result.Failure(ErrorCodes.UsuarioLoginNotFound, "El usuario no existe.");
+                }
 
-                await command.ExecuteNonQueryAsync();
+                // --- B. INSERTAR EN BITÁCORA (AUDITORÍA) ---
+                var auditCommand = connection.CreateCommand();
+                auditCommand.Transaction = transaction;
+                auditCommand.CommandText = @"
+                    INSERT INTO audit_logs (tabla_afectada, registro_id, accion, realizado_por, fecha_hora) 
+                    VALUES ('usuariologin', @RegistroId, 'UPDATE', @Actor, @FechaHora);";
+
+                AddParameter(auditCommand, "@RegistroId", entity.UsuarioLoginId);
+                AddParameter(auditCommand, "@Actor", actor);
+                AddParameter(auditCommand, "@FechaHora", DateTime.UtcNow);
+
+                await auditCommand.ExecuteNonQueryAsync();
+
+                // Confirmamos la transacción
+                transaction.Commit();
+
                 return Result.Success();
             }
             catch (Exception ex)
             {
-                return Result.Failure(ErrorCodes.DbError, $"Error al actualizar usuario login: {ex.Message}");
+                transaction.Rollback();
+                return Result.Failure(ErrorCodes.DbError, ex.Message);
             }
         }
 
-        private static UsuarioLogin ReconstituirFromReader(DbDataReader reader)
+        public async Task<Result<UsuarioLogin?>> GetByIdAsync(int id)
         {
-            var ordinal = reader.GetOrdinal;
-            var empleadoIdOrdinal = ordinal("empleadoid");
-            var clienteIdOrdinal = ordinal("clienteid");
+            using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync();
 
+            var command = connection.CreateCommand();
+            command.CommandText = "SELECT * FROM usuariologin WHERE usuariologinid = @Id;";
+            AddParameter(command, "@Id", id);
+
+            using var reader = await (command as System.Data.Common.DbCommand)!.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                return Result<UsuarioLogin?>.Success(MapReaderToEntity(reader));
+            }
+
+            return Result<UsuarioLogin?>.Failure(ErrorCodes.UsuarioLoginNotFound, "Usuario no encontrado.");
+        }
+
+        public async Task<IEnumerable<UsuarioLogin>> GetAllAsync()
+        {
+            var usuarios = new List<UsuarioLogin>();
+            using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync();
+
+            var command = connection.CreateCommand();
+            command.CommandText = "SELECT * FROM usuariologin;";
+
+            using var reader = await (command as System.Data.Common.DbCommand)!.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                usuarios.Add(MapReaderToEntity(reader));
+            }
+            return usuarios;
+        }
+
+        public async Task<UsuarioLogin?> GetByEmailAsync(string email)
+        {
+            using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync();
+
+            var command = connection.CreateCommand();
+            command.CommandText = "SELECT * FROM usuariologin WHERE email = @Email LIMIT 1;";
+            AddParameter(command, "@Email", email);
+
+            using var reader = await (command as System.Data.Common.DbCommand)!.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                return MapReaderToEntity(reader);
+            }
+            return null;
+        }
+
+        public async Task<UsuarioLogin?> GetByEmpleadoIdAsync(int empleadoId)
+        {
+            using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync();
+
+            var command = connection.CreateCommand();
+            command.CommandText = "SELECT * FROM usuariologin WHERE empleadoid = @EmpleadoId LIMIT 1;";
+            AddParameter(command, "@EmpleadoId", empleadoId);
+
+            using var reader = await (command as System.Data.Common.DbCommand)!.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                return MapReaderToEntity(reader);
+            }
+            return null;
+        }
+
+        public async Task<UsuarioLogin?> GetByClienteIdAsync(int clienteId)
+        {
+            using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync();
+
+            var command = connection.CreateCommand();
+            command.CommandText = "SELECT * FROM usuariologin WHERE clienteid = @ClienteId LIMIT 1;";
+            AddParameter(command, "@ClienteId", clienteId);
+
+            using var reader = await (command as System.Data.Common.DbCommand)!.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                return MapReaderToEntity(reader);
+            }
+            return null;
+        }
+
+        // ==========================================
+        // MÉTODOS AUXILIARES
+        // ==========================================
+        private void AddParameter(IDbCommand command, string name, object value)
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value;
+            command.Parameters.Add(parameter);
+        }
+
+        private UsuarioLogin MapReaderToEntity(System.Data.Common.DbDataReader reader)
+        {
             return UsuarioLogin.Reconstituir(
-                Convert.ToInt32(reader.GetValue(ordinal("usuariologinid"))),
-                reader.IsDBNull(empleadoIdOrdinal) ? null : (int?)Convert.ToInt32(reader.GetValue(empleadoIdOrdinal)),
-                reader.IsDBNull(clienteIdOrdinal) ? null : (int?)Convert.ToInt32(reader.GetValue(clienteIdOrdinal)),
-                reader.GetString(ordinal("email")),
-                reader.GetString(ordinal("passwordhash")),
-                reader.IsDBNull(ordinal("ultimoacceso")) ? null : (DateTime?)Convert.ToDateTime(reader.GetValue(ordinal("ultimoacceso"))),
-                Convert.ToBoolean(reader.GetValue(ordinal("activo"))),
-                Convert.ToBoolean(reader.GetValue(ordinal("requierecambiopassword"))),
-                Convert.ToBoolean(reader.GetValue(ordinal("escliente"))));
+                reader.GetInt32(reader.GetOrdinal("usuariologinid")),
+                reader.IsDBNull(reader.GetOrdinal("empleadoid")) ? null : reader.GetInt32(reader.GetOrdinal("empleadoid")),
+                reader.IsDBNull(reader.GetOrdinal("clienteid")) ? null : reader.GetInt32(reader.GetOrdinal("clienteid")),
+                reader.GetString(reader.GetOrdinal("email")),
+                reader.GetString(reader.GetOrdinal("passwordhash")),
+                reader.IsDBNull(reader.GetOrdinal("ultimoacceso")) ? null : reader.GetDateTime(reader.GetOrdinal("ultimoacceso")),
+                reader.GetBoolean(reader.GetOrdinal("activo")),
+                reader.GetBoolean(reader.GetOrdinal("requierecambiopassword")),
+                reader.GetBoolean(reader.GetOrdinal("escliente"))
+            );
         }
     }
 }

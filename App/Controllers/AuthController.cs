@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 using Taller_Mecanico_Users.Domain.Ports;
-using Taller_Mecanico_Users.Framework.DTOs.Users;
 
 namespace Taller_Mecanico_Users.App.Controllers
 {
@@ -9,23 +12,63 @@ namespace Taller_Mecanico_Users.App.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IUsuarioLoginRepository _loginRepository;
+        private readonly IConfiguration _configuration;
 
-        public AuthController(IUsuarioLoginRepository loginRepository)
+        public AuthController(IUsuarioLoginRepository loginRepository, IConfiguration configuration)
         {
             _loginRepository = loginRepository;
+            _configuration = configuration; // Inyectamos configuración para leer el Secret
         }
 
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
             var usuario = await _loginRepository.GetByEmailAsync(request.Email);
-            if (usuario == null)
-                return Unauthorized(new { message = "Credenciales inválidas." });
+            
+            // Validamos que exista y esté activo
+            if (usuario == null || !usuario.Activo)
+                return Unauthorized(new { message = "Credenciales inválidas o usuario inactivo." });
 
             if (!BCrypt.Net.BCrypt.Verify(request.Password, usuario.PasswordHash))
                 return Unauthorized(new { message = "Credenciales inválidas." });
 
-            return Ok(new { usuario.UsuarioLoginId, usuario.Email, usuario.EsCliente });
+            // Generamos el Token JWT
+            var token = GenerateJwtToken(usuario);
+
+            return Ok(new 
+            { 
+                Token = token,
+                RequiereCambioPassword = usuario.RequiereCambioPassword,
+                EsCliente = usuario.EsCliente
+            });
+        }
+
+        private string GenerateJwtToken(Domain.Entities.UsuarioLogin usuario)
+        {
+            var jwtSettings = _configuration.GetSection("JwtSettings");
+            var key = Encoding.ASCII.GetBytes(jwtSettings["Secret"]!);
+
+            // Aquí metemos información del usuario dentro del token (Claims)
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.NameIdentifier, usuario.UsuarioLoginId.ToString()),
+                new Claim(ClaimTypes.Email, usuario.Email),
+                new Claim("RequiereCambio", usuario.RequiereCambioPassword.ToString()),
+                new Claim(ClaimTypes.Role, usuario.EsCliente ? "Cliente" : "Empleado")
+            };
+
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims),
+                Expires = DateTime.UtcNow.AddMinutes(double.Parse(jwtSettings["ExpirationInMinutes"]!)),
+                Issuer = jwtSettings["Issuer"],
+                Audience = jwtSettings["Audience"],
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+            };
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return tokenHandler.WriteToken(token);
         }
     }
 
