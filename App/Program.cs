@@ -41,7 +41,12 @@ builder.Services.AddScoped<Taller_Mecanico_Users.Framework.Services.IAuthenticat
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<Taller_Mecanico_Users.Framework.Services.IMailSender, Taller_Mecanico_Users.App.Services.DummyMailSender>();
 builder.Services.AddScoped<Taller_Mecanico_Users.UseCases.Users.CreateUserUseCase>();
+builder.Services.AddScoped<Taller_Mecanico_Users.UseCases.Users.GetUserByIdUseCase>();
+builder.Services.AddScoped<Taller_Mecanico_Users.UseCases.Users.GetUsersUseCase>();
 builder.Services.AddScoped<Taller_Mecanico_Users.UseCases.Users.UpdateUserUseCase>(); 
+builder.Services.AddScoped<Taller_Mecanico_Users.UseCases.Users.ChangePasswordUseCase>();
+builder.Services.AddScoped<Taller_Mecanico_Users.UseCases.Users.ResetPasswordUseCase>();
+builder.Services.AddScoped<Taller_Mecanico_Users.UseCases.Users.DeleteUserUseCase>();
 
 var app = builder.Build();
 

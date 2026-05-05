@@ -40,8 +40,10 @@ public class AuthenticationHelper : IAuthenticationHelper
             return null;
         }
 
-        var employeeIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier);
-        if (employeeIdClaim != null && int.TryParse(employeeIdClaim.Value, out var employeeId))
+        var employeeIdClaim = httpContext.User.FindFirst("EmpleadoId")?.Value
+            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (!string.IsNullOrWhiteSpace(employeeIdClaim) && int.TryParse(employeeIdClaim, out var employeeId))
         {
             return employeeId;
         }
@@ -57,10 +59,16 @@ public class AuthenticationHelper : IAuthenticationHelper
             return "sistema";
         }
 
-        var employeeIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var employeeIdClaim = httpContext.User.FindFirst("EmpleadoId")?.Value;
         if (!string.IsNullOrWhiteSpace(employeeIdClaim))
         {
             return employeeIdClaim;
+        }
+
+        var clientIdClaim = httpContext.User.FindFirst("ClienteId")?.Value;
+        if (!string.IsNullOrWhiteSpace(clientIdClaim))
+        {
+            return clientIdClaim;
         }
 
         var emailClaim = httpContext.User.FindFirst(ClaimTypes.Email)?.Value;

@@ -20,7 +20,7 @@ namespace Taller_Mecanico_Users.UseCases.Users
         public async Task<UsuarioLogin> ExecuteAsync(int empleadoId, string email)
         {
             // 1. Generar contraseña segura temporal
-            string plainPassword = GenerateSecurePassword();
+            string plainPassword = PasswordSecurity.GenerateSecurePassword();
             
             // 2. Encriptar la contraseña
             string passwordHash = BCrypt.Net.BCrypt.HashPassword(plainPassword);
@@ -29,19 +29,17 @@ namespace Taller_Mecanico_Users.UseCases.Users
             var nuevoUsuario = UsuarioLogin.Crear(empleadoId, email, passwordHash, requiereCambioPassword: true);
 
             // 4. Guardar en el repositorio
-            await _repository.AddAsync(nuevoUsuario);
+            var addResult = await _repository.AddAsync(nuevoUsuario);
+            if (addResult.IsFailure)
+            {
+                throw new InvalidOperationException($"Error al crear usuario: {addResult.ErrorMessage}");
+            }
 
             // 5. Enviar credenciales por correo simulado
             string mailBody = $"Hola,\nTu cuenta ha sido creada exitosamente.\nTu contraseña temporal es: {plainPassword}\nPor favor, cámbiala al iniciar sesión por primera vez.";
             await _mailSender.SendEmailAsync(email, "Credenciales de Acceso - Taller Mecánico", mailBody);
 
             return nuevoUsuario;
-        }
-
-        private string GenerateSecurePassword()
-        {
-            // Genera un string aleatorio de 8 caracteres y le añade "Aa1!" para cumplir con requisitos de complejidad
-            return Guid.NewGuid().ToString("N").Substring(0, 8) + "Aa1!"; 
         }
     }
 }

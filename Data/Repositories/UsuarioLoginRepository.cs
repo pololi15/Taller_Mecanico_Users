@@ -96,7 +96,8 @@ namespace Taller_Mecanico_Users.Data.Repositories
                     SET email = @Email, 
                         activo = @Activo, 
                         requierecambiopassword = @RequiereCambioPassword,
-                        passwordhash = @PasswordHash
+                        passwordhash = @PasswordHash,
+                        ultimoacceso = @UltimoAcceso
                     WHERE usuariologinid = @UsuarioLoginId;";
 
                 AddParameter(command, "@UsuarioLoginId", entity.UsuarioLoginId);
@@ -104,6 +105,7 @@ namespace Taller_Mecanico_Users.Data.Repositories
                 AddParameter(command, "@Activo", entity.Activo);
                 AddParameter(command, "@RequiereCambioPassword", entity.RequiereCambioPassword);
                 AddParameter(command, "@PasswordHash", entity.PasswordHash);
+                AddParameter(command, "@UltimoAcceso", entity.UltimoAcceso ?? (object)DBNull.Value);
 
                 var rowsAffected = await command.ExecuteNonQueryAsync();
 
@@ -226,6 +228,54 @@ namespace Taller_Mecanico_Users.Data.Repositories
         // ==========================================
         // MÉTODOS AUXILIARES
         // ==========================================
+        public async Task<Result> DeleteAsync(int id)
+        {
+            string actor = _authHelper.GetCurrentAuditActor();
+
+            using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync();
+            using var transaction = connection.BeginTransaction();
+
+            try
+            {
+                // --- A. ELIMINAR EL USUARIO ---
+                var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = @"DELETE FROM usuariologin WHERE usuariologinid = @UsuarioLoginId;";
+                AddParameter(command, "@UsuarioLoginId", id);
+
+                var rowsAffected = await command.ExecuteNonQueryAsync();
+
+                if (rowsAffected == 0)
+                {
+                    return Result.Failure(ErrorCodes.UsuarioLoginNotFound, "Usuario no encontrado.");
+                }
+
+                // --- B. INSERTAR EN BITÁCORA (AUDITORÍA) ---
+                var auditCommand = connection.CreateCommand();
+                auditCommand.Transaction = transaction;
+                auditCommand.CommandText = @"
+                    INSERT INTO audit_logs (tabla_afectada, registro_id, accion, realizado_por, fecha_hora) 
+                    VALUES ('usuariologin', @RegistroId, 'DELETE', @Actor, @FechaHora);";
+
+                AddParameter(auditCommand, "@RegistroId", id);
+                AddParameter(auditCommand, "@Actor", actor);
+                AddParameter(auditCommand, "@FechaHora", DateTime.UtcNow);
+
+                await auditCommand.ExecuteNonQueryAsync();
+
+                // Confirmamos la transacción
+                transaction.Commit();
+
+                return Result.Success();
+            }
+            catch (Exception ex)
+            {
+                transaction.Rollback();
+                return Result.Failure(ErrorCodes.DbError, ex.Message);
+            }
+        }
+
         private void AddParameter(IDbCommand command, string name, object value)
         {
             var parameter = command.CreateParameter();

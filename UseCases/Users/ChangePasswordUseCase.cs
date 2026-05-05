@@ -12,8 +12,14 @@ namespace Taller_Mecanico_Users.UseCases.Users
             _loginRepository = loginRepository;
         }
 
-        public async Task<Result> ExecuteAsync(int usuarioLoginId, string nuevoPasswordHash)
+        public async Task<Result> ExecuteAsync(int usuarioLoginId, string nuevoPassword)
         {
+            var validationResult = PasswordSecurity.ValidatePassword(nuevoPassword);
+            if (validationResult.IsFailure)
+            {
+                return validationResult;
+            }
+
             var userResult = await _loginRepository.GetByIdAsync(usuarioLoginId);
             if (userResult.IsFailure)
                 return Result.Failure(userResult.ErrorCode ?? ErrorCodes.DbError, userResult.ErrorMessage ?? "Error al obtener usuario.");
@@ -22,7 +28,7 @@ namespace Taller_Mecanico_Users.UseCases.Users
             if (user == null)
                 return Result.Failure(ErrorCodes.UsuarioLoginNotFound, "Usuario no encontrado.");
 
-            user.CambiarPassword(nuevoPasswordHash);
+            user.CambiarPassword(BCrypt.Net.BCrypt.HashPassword(nuevoPassword));
             return await _loginRepository.UpdateAsync(user);
         }
     }

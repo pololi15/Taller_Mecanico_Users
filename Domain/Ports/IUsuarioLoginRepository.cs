@@ -14,5 +14,6 @@ namespace Taller_Mecanico_Users.Domain.Ports
         Task<UsuarioLogin?> GetByClienteIdAsync(int clienteId);
         Task<Result> AddAsync(UsuarioLogin entity);
         Task<Result> UpdateAsync(UsuarioLogin entity);
+        Task<Result> DeleteAsync(int id);
     }
 }

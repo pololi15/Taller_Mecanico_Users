@@ -32,6 +32,9 @@ namespace Taller_Mecanico_Users.App.Controllers
             if (!BCrypt.Net.BCrypt.Verify(request.Password, usuario.PasswordHash))
                 return Unauthorized(new { message = "Credenciales inválidas." });
 
+            usuario.RegistrarAcceso();
+            await _loginRepository.UpdateAsync(usuario);
+
             // Generamos el Token JWT
             var token = GenerateJwtToken(usuario);
 
@@ -41,6 +44,34 @@ namespace Taller_Mecanico_Users.App.Controllers
                 RequiereCambioPassword = usuario.RequiereCambioPassword,
                 EsCliente = usuario.EsCliente
             });
+        }
+
+        [HttpPost("test-token")]
+        public IActionResult GetTestToken()
+        {
+            var jwtSettings = _configuration.GetSection("JwtSettings");
+            var key = Encoding.ASCII.GetBytes(jwtSettings["Secret"]!);
+
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.NameIdentifier, "999"),
+                new Claim(ClaimTypes.Email, "test@empleado.com"),
+                new Claim("RequiereCambio", "false"),
+                new Claim(ClaimTypes.Role, "Empleado")
+            };
+
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims),
+                Expires = DateTime.UtcNow.AddMinutes(120),
+                Issuer = jwtSettings["Issuer"],
+                Audience = jwtSettings["Audience"],
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+            };
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return Ok(new { token = tokenHandler.WriteToken(token) });
         }
 
         private string GenerateJwtToken(Domain.Entities.UsuarioLogin usuario)
@@ -56,6 +87,16 @@ namespace Taller_Mecanico_Users.App.Controllers
                 new Claim("RequiereCambio", usuario.RequiereCambioPassword.ToString()),
                 new Claim(ClaimTypes.Role, usuario.EsCliente ? "Cliente" : "Empleado")
             };
+
+            if (usuario.EmpleadoId.HasValue)
+            {
+                claims.Add(new Claim("EmpleadoId", usuario.EmpleadoId.Value.ToString()));
+            }
+
+            if (usuario.ClienteId.HasValue)
+            {
+                claims.Add(new Claim("ClienteId", usuario.ClienteId.Value.ToString()));
+            }
 
             var tokenDescriptor = new SecurityTokenDescriptor
             {
