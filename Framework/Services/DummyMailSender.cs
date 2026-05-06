@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 
 namespace Taller_Mecanico_Users.App.Services // Mantenemos el namespace que registraste
 {
-    public class DummyMailSender : Taller_Mecanico_Users.Framework.Services.IMailSender
+    public class DummyMailSender : Taller_Mecanico_Users.Framework.Services.IMailSender, Taller_Mecanico_Users.Domain.Ports.IMailSender
     {
         public Task SendEmailAsync(string to, string subject, string body)
         {

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Threading.Tasks;
+using Npgsql;
 using Taller_Mecanico_Users.Domain.Common;
 using Taller_Mecanico_Users.Domain.Entities;
 using Taller_Mecanico_Users.Domain.Ports;
@@ -13,21 +14,20 @@ namespace Taller_Mecanico_Users.Data.Repositories
     public class UsuarioLoginRepository : IUsuarioLoginRepository
     {
         private readonly ISqlConnectionFactory _connectionFactory;
-        private readonly IAuthenticationHelper _authHelper;
+        private readonly IAuditService _auditService;
 
-        public UsuarioLoginRepository(ISqlConnectionFactory connectionFactory, IAuthenticationHelper authHelper)
+        public UsuarioLoginRepository(ISqlConnectionFactory connectionFactory, IAuditService auditService)
         {
             _connectionFactory = connectionFactory;
-            _authHelper = authHelper;
+            _auditService = auditService;
         }
 
         public async Task<Result> AddAsync(UsuarioLogin entity)
         {
-            string actor = _authHelper.GetCurrentAuditActor();
             
-            using var connection = _connectionFactory.CreateConnection();
+            await using var connection = _connectionFactory.CreateConnection();
             await connection.OpenAsync();
-            using var transaction = connection.BeginTransaction();
+            await using var transaction = await (connection as System.Data.Common.DbConnection)!.BeginTransactionAsync();
 
             try
             {
@@ -50,41 +50,39 @@ namespace Taller_Mecanico_Users.Data.Repositories
                 var result = await command.ExecuteScalarAsync();
                 if (result != null)
                 {
-                    entity.UsuarioLoginId = Convert.ToInt32(result);
+                    var assignIdResult = entity.AsignarIdentificador(Convert.ToInt32(result));
+                    if (assignIdResult.IsFailure)
+                    {
+                        return assignIdResult;
+                    }
                 }
 
-                // --- B. INSERTAR EN BITÁCORA (AUDITORÍA) ---
-                var auditCommand = connection.CreateCommand();
-                auditCommand.Transaction = transaction;
-                auditCommand.CommandText = @"
-                    INSERT INTO audit_logs (tabla_afectada, registro_id, accion, realizado_por, fecha_hora) 
-                    VALUES ('usuariologin', @RegistroId, 'INSERT', @Actor, @FechaHora);";
-
-                AddParameter(auditCommand, "@RegistroId", entity.UsuarioLoginId);
-                AddParameter(auditCommand, "@Actor", actor);
-                AddParameter(auditCommand, "@FechaHora", DateTime.UtcNow);
-
-                await auditCommand.ExecuteNonQueryAsync();
+                // --- B. AUDITORÍA (delegada al servicio) ---
+                await _auditService.LogAsync(connection, transaction, "usuariologin", entity.UsuarioLoginId, "INSERT");
 
                 // Confirmamos la transacción
-                transaction.Commit();
+                await transaction.CommitAsync();
 
                 return Result.Success();
             }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+            {
+                try { await transaction.RollbackAsync(); } catch { }
+                return Result.Failure(ErrorCodes.ValidationDuplicateValue, "Ya existe un registro con valores duplicados.");
+            }
             catch (Exception ex)
             {
-                transaction.Rollback();
+                try { await transaction.RollbackAsync(); } catch { }
                 return Result.Failure(ErrorCodes.DbError, ex.Message);
             }
         }
 
         public async Task<Result> UpdateAsync(UsuarioLogin entity)
         {
-            string actor = _authHelper.GetCurrentAuditActor();
             
-            using var connection = _connectionFactory.CreateConnection();
+            await using var connection = _connectionFactory.CreateConnection();
             await connection.OpenAsync();
-            using var transaction = connection.BeginTransaction();
+            await using var transaction = await (connection as System.Data.Common.DbConnection)!.BeginTransactionAsync();
 
             try
             {
@@ -114,27 +112,22 @@ namespace Taller_Mecanico_Users.Data.Repositories
                     return Result.Failure(ErrorCodes.UsuarioLoginNotFound, "El usuario no existe.");
                 }
 
-                // --- B. INSERTAR EN BITÁCORA (AUDITORÍA) ---
-                var auditCommand = connection.CreateCommand();
-                auditCommand.Transaction = transaction;
-                auditCommand.CommandText = @"
-                    INSERT INTO audit_logs (tabla_afectada, registro_id, accion, realizado_por, fecha_hora) 
-                    VALUES ('usuariologin', @RegistroId, 'UPDATE', @Actor, @FechaHora);";
-
-                AddParameter(auditCommand, "@RegistroId", entity.UsuarioLoginId);
-                AddParameter(auditCommand, "@Actor", actor);
-                AddParameter(auditCommand, "@FechaHora", DateTime.UtcNow);
-
-                await auditCommand.ExecuteNonQueryAsync();
+                // --- B. AUDITORÍA (delegada al servicio) ---
+                await _auditService.LogAsync(connection, transaction, "usuariologin", entity.UsuarioLoginId, "UPDATE");
 
                 // Confirmamos la transacción
-                transaction.Commit();
+                await transaction.CommitAsync();
 
                 return Result.Success();
             }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+            {
+                try { await transaction.RollbackAsync(); } catch { }
+                return Result.Failure(ErrorCodes.ValidationDuplicateValue, "Ya existe un registro con valores duplicados.");
+            }
             catch (Exception ex)
             {
-                transaction.Rollback();
+                try { await transaction.RollbackAsync(); } catch { }
                 return Result.Failure(ErrorCodes.DbError, ex.Message);
             }
         }
@@ -230,11 +223,10 @@ namespace Taller_Mecanico_Users.Data.Repositories
         // ==========================================
         public async Task<Result> DeleteAsync(int id)
         {
-            string actor = _authHelper.GetCurrentAuditActor();
-
-            using var connection = _connectionFactory.CreateConnection();
+            
+            await using var connection = _connectionFactory.CreateConnection();
             await connection.OpenAsync();
-            using var transaction = connection.BeginTransaction();
+            await using var transaction = await (connection as System.Data.Common.DbConnection)!.BeginTransactionAsync();
 
             try
             {
@@ -251,27 +243,22 @@ namespace Taller_Mecanico_Users.Data.Repositories
                     return Result.Failure(ErrorCodes.UsuarioLoginNotFound, "Usuario no encontrado.");
                 }
 
-                // --- B. INSERTAR EN BITÁCORA (AUDITORÍA) ---
-                var auditCommand = connection.CreateCommand();
-                auditCommand.Transaction = transaction;
-                auditCommand.CommandText = @"
-                    INSERT INTO audit_logs (tabla_afectada, registro_id, accion, realizado_por, fecha_hora) 
-                    VALUES ('usuariologin', @RegistroId, 'DELETE', @Actor, @FechaHora);";
-
-                AddParameter(auditCommand, "@RegistroId", id);
-                AddParameter(auditCommand, "@Actor", actor);
-                AddParameter(auditCommand, "@FechaHora", DateTime.UtcNow);
-
-                await auditCommand.ExecuteNonQueryAsync();
+                // --- B. AUDITORÍA (delegada al servicio) ---
+                await _auditService.LogAsync(connection, transaction, "usuariologin", id, "DELETE");
 
                 // Confirmamos la transacción
-                transaction.Commit();
+                await transaction.CommitAsync();
 
                 return Result.Success();
             }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+            {
+                try { await transaction.RollbackAsync(); } catch { }
+                return Result.Failure(ErrorCodes.ValidationDuplicateValue, "Ya existe un registro con valores duplicados.");
+            }
             catch (Exception ex)
             {
-                transaction.Rollback();
+                try { await transaction.RollbackAsync(); } catch { }
                 return Result.Failure(ErrorCodes.DbError, ex.Message);
             }
         }
@@ -286,7 +273,7 @@ namespace Taller_Mecanico_Users.Data.Repositories
 
         private UsuarioLogin MapReaderToEntity(System.Data.Common.DbDataReader reader)
         {
-            return UsuarioLogin.Reconstituir(
+            var result = UsuarioLogin.Reconstituir(
                 reader.GetInt32(reader.GetOrdinal("usuariologinid")),
                 reader.IsDBNull(reader.GetOrdinal("empleadoid")) ? null : reader.GetInt32(reader.GetOrdinal("empleadoid")),
                 reader.IsDBNull(reader.GetOrdinal("clienteid")) ? null : reader.GetInt32(reader.GetOrdinal("clienteid")),
@@ -297,6 +284,13 @@ namespace Taller_Mecanico_Users.Data.Repositories
                 reader.GetBoolean(reader.GetOrdinal("requierecambiopassword")),
                 reader.GetBoolean(reader.GetOrdinal("escliente"))
             );
+
+            if (result.IsFailure)
+            {
+                throw new InvalidOperationException($"Datos inválidos de usuario login en la base de datos: {result.ErrorMessage}");
+            }
+
+            return result.Value!;
         }
     }
 }

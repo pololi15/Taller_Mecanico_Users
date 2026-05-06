@@ -23,6 +23,7 @@ namespace Taller_Mecanico_Users.Domain.Common
 
         public const string UsuarioLoginNotFound = "USUARIO_LOGIN_NOT_FOUND";
         public const string UsuarioEmailDuplicado = "USUARIO_EMAIL_DUPLICADO";
+        public const string UsuarioEmpleadoDuplicado = "USUARIO_EMPLEADO_DUPLICADO";
 
         public const string EmailNotConfigured = "EMAIL_NOT_CONFIGURED";
         public const string EmailSendFailed = "EMAIL_SEND_FAILED";

@@ -1,14 +1,12 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Npgsql;
-using Taller_Mecanico_Users.Domain.Ports;
 
 namespace Taller_Mecanico_Users.App.Middleware
 {
     public class RequirePasswordChangeMiddleware
     {
         private readonly RequestDelegate _next;
-        private const string DEFAULT_ADMIN_EMAIL = "administrador.principal@taller.com";
 
         public RequirePasswordChangeMiddleware(RequestDelegate next)
         {
@@ -17,73 +15,29 @@ namespace Taller_Mecanico_Users.App.Middleware
 
         public async Task InvokeAsync(
             HttpContext context,
-            IUsuarioLoginRepository loginRepository,
             ILogger<RequirePasswordChangeMiddleware> logger)
         {
             if (context.User.Identity?.IsAuthenticated == true)
             {
-                var path = context.Request.Path.Value?.ToLower() ?? string.Empty;
+                var path = context.Request.Path.Value?.ToLowerInvariant() ?? string.Empty;
+                var isLoginPath = path.StartsWith("/api/auth/login");
+                var isChangePasswordPath = path.StartsWith("/api/users/") && path.Contains("/change-password");
 
-                var allowedPaths = new[] 
-                { 
-                    "/changepassword", 
-                    "/logout", 
-                    "/login",
-                    "/lib/",
-                    "/css/",
-                    "/js/",
-                    "/fotos/"
-                };
-
-                bool isAllowedPath = allowedPaths.Any(allowed => path.StartsWith(allowed));
-
-                if (!isAllowedPath)
+                if (!isLoginPath && !isChangePasswordPath)
                 {
-                    var clienteIdClaim = context.User.FindFirst("ClienteId")?.Value;
-                    
-                    if (!string.IsNullOrEmpty(clienteIdClaim) && int.TryParse(clienteIdClaim, out int clienteId))
+                    var requiresPasswordChangeClaim = context.User.FindFirst("RequiereCambio")?.Value;
+                    if (bool.TryParse(requiresPasswordChangeClaim, out var requiresPasswordChange) && requiresPasswordChange)
                     {
-                        try
-                        {
-                            var allLogins = await loginRepository.GetAllAsync();
-                            var usuario = allLogins.FirstOrDefault(u => u.ClienteId == clienteId);
+                        logger.LogInformation("Bloqueando acceso hasta que el usuario cambie su contraseña.");
 
-                            if (usuario != null && usuario.RequiereCambioPassword)
-                            {
-                                context.Response.Redirect("/ChangePassword");
-                                return;
-                            }
-                        }
-                        catch (NpgsqlException ex)
+                        context.Response.StatusCode = StatusCodes.Status428PreconditionRequired;
+                        context.Response.ContentType = "application/json";
+                        await context.Response.WriteAsync(JsonSerializer.Serialize(new
                         {
-                            logger.LogWarning(ex, "No se pudo verificar el estado de cambio de contraseña por indisponibilidad de PostgreSQL.");
-                        }
-                    }
-                    else
-                    {
-                        var empleadoIdClaim = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-                        if (!string.IsNullOrEmpty(empleadoIdClaim) && int.TryParse(empleadoIdClaim, out int empleadoId))
-                        {
-                            try
-                            {
-                                var allLogins = await loginRepository.GetAllAsync();
-                                var usuario = allLogins.FirstOrDefault(u => u.EmpleadoId == empleadoId);
-
-                                if (usuario != null)
-                                {
-                                    if (usuario.RequiereCambioPassword && usuario.Email != DEFAULT_ADMIN_EMAIL)
-                                    {
-                                        context.Response.Redirect("/ChangePassword");
-                                        return;
-                                    }
-                                }
-                            }
-                            catch (NpgsqlException ex)
-                            {
-                                logger.LogWarning(ex, "No se pudo verificar el estado de cambio de contraseña por indisponibilidad de PostgreSQL.");
-                            }
-                        }
+                            code = "PASSWORD_CHANGE_REQUIRED",
+                            message = "Debe cambiar su contraseña antes de continuar."
+                        }));
+                        return;
                     }
                 }
             }

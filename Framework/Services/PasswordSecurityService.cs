@@ -1,13 +1,18 @@
 using System.Security.Cryptography;
 using Taller_Mecanico_Users.Domain.Common;
 
-namespace Taller_Mecanico_Users.UseCases.Users
+namespace Taller_Mecanico_Users.Framework.Services
 {
-    internal static class PasswordSecurity
+    /// <summary>
+    /// Implementación concreta del servicio de seguridad de contraseñas.
+    /// Encapsula la lógica de validación y generación de passwords.
+    /// Puede ser inyectada en UseCases y testeable.
+    /// </summary>
+    public class PasswordSecurityService : IPasswordSecurity, Taller_Mecanico_Users.Domain.Ports.IPasswordSecurity
     {
         private const int MinimumLength = 8;
 
-        public static Result ValidatePassword(string? password)
+        public Result ValidatePassword(string? password)
         {
             if (string.IsNullOrWhiteSpace(password))
             {
@@ -43,7 +48,7 @@ namespace Taller_Mecanico_Users.UseCases.Users
             return Result.Success();
         }
 
-        public static string GenerateSecurePassword(int length = 12)
+        public string GenerateSecurePassword(int length = 12)
         {
             if (length < MinimumLength)
             {

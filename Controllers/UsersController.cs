@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using System.Security.Claims;
 using Taller_Mecanico_Users.UseCases.Users;
 
-namespace Taller_Mecanico_Users.App.Controllers
+namespace Taller_Mecanico_Users.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
@@ -43,15 +43,14 @@ namespace Taller_Mecanico_Users.App.Controllers
         [Authorize(Roles = "Empleado")] // Solo empleados pueden crear
         public async Task<IActionResult> CreateUser([FromBody] CreateUserRequest request)
         {
-            try
+            var usuarioResult = await _createUserUseCase.ExecuteAsync(request.EmpleadoId, request.Email);
+            if (usuarioResult.IsFailure || usuarioResult.Value == null)
             {
-                var usuario = await _createUserUseCase.ExecuteAsync(request.EmpleadoId, request.Email);
-                return CreatedAtAction(nameof(GetUserById), new { id = usuario.UsuarioLoginId }, new { usuario.UsuarioLoginId, usuario.Email });
+                return ApiResultMapper.MapError(this, usuarioResult);
             }
-            catch (Exception ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
+
+            var usuario = usuarioResult.Value;
+            return CreatedAtAction(nameof(GetUserById), new { id = usuario.UsuarioLoginId }, new { usuario.UsuarioLoginId, usuario.Email });
         }
 
         [HttpGet("{id}")]
@@ -61,7 +60,7 @@ namespace Taller_Mecanico_Users.App.Controllers
             var result = await _getUserByIdUseCase.ExecuteAsync(id);
             if (result.IsFailure)
             {
-                return NotFound(new { message = result.ErrorMessage ?? "Usuario no encontrado." });
+                return ApiResultMapper.MapError(this, result);
             }
 
             var usuario = result.Value;
@@ -89,7 +88,7 @@ namespace Taller_Mecanico_Users.App.Controllers
 
             if (result.IsFailure)
             {
-                return BadRequest(new { message = result.ErrorMessage });
+                return ApiResultMapper.MapError(this, result);
             }
 
             return NoContent(); 
@@ -99,25 +98,15 @@ namespace Taller_Mecanico_Users.App.Controllers
         [Authorize]
         public async Task<IActionResult> ChangePassword(int id, [FromBody] ChangePasswordRequest request)
         {
-            if (!ModelState.IsValid)
-            {
-                return ValidationProblem(ModelState);
-            }
-
-            if (request.NewPassword != request.ConfirmPassword)
-            {
-                return BadRequest(new { message = "Las contraseñas no coinciden." });
-            }
-
             if (!CanChangeOwnPassword(id))
             {
                 return Forbid();
             }
 
-            var result = await _changePasswordUseCase.ExecuteAsync(id, request.NewPassword);
+            var result = await _changePasswordUseCase.ExecuteAsync(id, request.CurrentPassword, request.NewPassword, request.ConfirmPassword);
             if (result.IsFailure)
             {
-                return BadRequest(new { message = result.ErrorMessage });
+                return ApiResultMapper.MapError(this, result);
             }
 
             return NoContent();
@@ -130,7 +119,7 @@ namespace Taller_Mecanico_Users.App.Controllers
             var result = await _resetPasswordUseCase.ExecuteAsync(id);
             if (result.IsFailure)
             {
-                return BadRequest(new { message = result.ErrorMessage });
+                return ApiResultMapper.MapError(this, result);
             }
 
             return NoContent();
@@ -143,7 +132,7 @@ namespace Taller_Mecanico_Users.App.Controllers
             var result = await _deleteUserUseCase.ExecuteAsync(id);
             if (result.IsFailure)
             {
-                return BadRequest(new { message = result.ErrorMessage });
+                return ApiResultMapper.MapError(this, result);
             }
 
             return NoContent();
@@ -188,8 +177,9 @@ namespace Taller_Mecanico_Users.App.Controllers
         public bool Activo { get; set; }
     }
 
-    public class ChangePasswordRequest
+        public class ChangePasswordRequest
     {
+        public string CurrentPassword { get; set; } = string.Empty;
         public string NewPassword { get; set; } = string.Empty;
         public string ConfirmPassword { get; set; } = string.Empty;
     }
