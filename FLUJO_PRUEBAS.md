@@ -13,8 +13,8 @@ Este documento describe un flujo práctico para validar el sistema end-to-end, d
 3. Verifica que la solución compile.
 
 ```bash
-cd "/home/Pololi15/Documentos/Universidad/7_Semestre/ARQUITECTURA_DE_SOFTWARE/codigos_docente/Nueva carpeta/Taller_Mecanico_Users"
-dotnet build App/App.csproj
+cd "c:\Arqui_Soft\Taller_Mecanico_Users"
+dotnet build Taller_Mecanico_Users.sln
 ```
 
 ## 2. Flujo de autenticación
@@ -103,7 +103,7 @@ dotnet build App/App.csproj
 3. Si Gmail rechaza autenticación, revisa que la contraseña sea una App Password válida.
 
 ```bash
-cd "/home/Pololi15/Documentos/Universidad/7_Semestre/ARQUITECTURA_DE_SOFTWARE/codigos_docente/Nueva carpeta/Taller_Mecanico_Users/Tools/SmtpTest"
+cd "c:\Arqui_Soft\Taller_Mecanico_Users\Tools\SmtpTest"
 dotnet run --project SmtpTest.csproj
 ```
 
